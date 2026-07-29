@@ -1,0 +1,16 @@
+[workspace]
+members = [".", "compat-test"]
+
+[package]
+name = "watchman-rs"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[[bin]]
+name = "watchman"
+path = "src/main.rs"
+
+[dependencies]
+inotify = { version = "0.11.4", default-features = false }
+libc = "0.2.189"

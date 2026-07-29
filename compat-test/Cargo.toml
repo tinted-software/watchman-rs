@@ -1,0 +1,15 @@
+[package]
+name = "wm-compat-test"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# This crate is a dev-only compatibility harness: it links the real
+# `watchman_client` crate (used by buck2) and talks to our daemon over its
+# actual UNIX socket + BSER-v2 wire protocol, to verify interop. It is a
+# separate workspace member so its (much heavier) dependency tree never
+# affects the `watchman` binary itself.
+[dependencies]
+watchman_client = "0.9.0"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
