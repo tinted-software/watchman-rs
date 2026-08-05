@@ -11,6 +11,7 @@
 
 use crate::config::{Config, Ignore};
 use crate::cookie;
+use crate::ipc::{UnixListener, UnixStream};
 use crate::paths;
 use crate::protocol;
 use crate::query::Expr;
@@ -19,7 +20,6 @@ use crate::value::Value;
 use crate::watcher::{self, RootState};
 use std::collections::HashMap;
 use std::io::{BufReader, BufWriter};
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -165,7 +165,7 @@ fn dispatch(daemon: &Daemon, req: &Value) -> Value {
             match daemon.watch(root.clone()) {
                 Ok(_) => Value::obj()
                     .set("watch", root.to_string_lossy().into_owned())
-                    .set("watcher", "inotify")
+                    .set("watcher", watcher::watcher_name())
                     .set("version", VERSION)
                     .build(),
                 Err(e) => err_resp(format!("failed to watch {}: {e}", root.display())),
@@ -187,7 +187,7 @@ fn dispatch(daemon: &Daemon, req: &Value) -> Value {
                     let mut obj = Value::obj()
                         .set("version", VERSION)
                         .set("watch", root.to_string_lossy().into_owned())
-                        .set("watcher", "inotify");
+                        .set("watcher", watcher::watcher_name());
                     if let Some(rel) = relative_path {
                         obj = obj.set("relative_path", rel);
                     }

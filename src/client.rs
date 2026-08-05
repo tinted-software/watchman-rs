@@ -15,12 +15,12 @@
 //! commands.
 
 use crate::bser::PduVersion;
+use crate::ipc::UnixStream;
 use crate::json;
 use crate::paths;
 use crate::protocol::{self, Framing};
 use crate::value::Value;
 use std::io::BufReader;
-use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
 #[derive(Clone, Copy, PartialEq)]

@@ -8,14 +8,34 @@ pub fn canonicalize(p: &str) -> std::io::Result<PathBuf> {
 }
 
 fn user_name() -> String {
-    std::env::var("USER")
-        .or_else(|_| std::env::var("LOGNAME"))
-        .unwrap_or_else(|_| "unknown".to_string())
+    #[cfg(windows)]
+    {
+        std::env::var("USERNAME").unwrap_or_else(|_| "unknown".to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("USER")
+            .or_else(|_| std::env::var("LOGNAME"))
+            .unwrap_or_else(|_| "unknown".to_string())
+    }
+}
+
+fn temp_dir() -> PathBuf {
+    #[cfg(windows)]
+    {
+        std::env::var("TEMP")
+            .or_else(|_| std::env::var("TMP"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("C:\\Windows\\Temp"))
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from(std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string()))
+    }
 }
 
 pub fn state_dir() -> PathBuf {
-    let base = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(base).join(format!("watchman-rs-{}", user_name()))
+    temp_dir().join(format!("watchman-rs-{}", user_name()))
 }
 
 pub fn sock_path() -> PathBuf {

@@ -6,10 +6,42 @@
 use crate::config::Ignore;
 use std::collections::HashMap;
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::FileTypeExt;
+#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[cfg(unix)]
+fn platform_mtime(meta: &fs::Metadata) -> i64 {
+    meta.mtime()
+}
+
+#[cfg(unix)]
+fn platform_mode(meta: &fs::Metadata) -> u32 {
+    meta.mode()
+}
+
+#[cfg(not(unix))]
+fn platform_mtime(meta: &fs::Metadata) -> i64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+#[cfg(not(unix))]
+fn platform_mode(meta: &fs::Metadata) -> u32 {
+    if meta.permissions().readonly() {
+        0o444
+    } else if meta.is_dir() {
+        0o755
+    } else {
+        0o644
+    }
+}
 
 /// Watchman's single-letter file type codes (see `FileType` in the
 /// `watchman_client` crate / `docs/expr/type.html`).
@@ -28,22 +60,37 @@ pub enum Kind {
 impl Kind {
     pub fn from_metadata(meta: &fs::Metadata) -> Kind {
         let ft = meta.file_type();
-        if ft.is_dir() {
-            Kind::Directory
-        } else if ft.is_symlink() {
-            Kind::Symlink
-        } else if ft.is_file() {
-            Kind::Regular
-        } else if ft.is_block_device() {
-            Kind::BlockSpecial
-        } else if ft.is_char_device() {
-            Kind::CharSpecial
-        } else if ft.is_fifo() {
-            Kind::Fifo
-        } else if ft.is_socket() {
-            Kind::Socket
-        } else {
-            Kind::Unknown
+        #[cfg(unix)]
+        {
+            if ft.is_dir() {
+                Kind::Directory
+            } else if ft.is_symlink() {
+                Kind::Symlink
+            } else if ft.is_file() {
+                Kind::Regular
+            } else if ft.is_block_device() {
+                Kind::BlockSpecial
+            } else if ft.is_char_device() {
+                Kind::CharSpecial
+            } else if ft.is_fifo() {
+                Kind::Fifo
+            } else if ft.is_socket() {
+                Kind::Socket
+            } else {
+                Kind::Unknown
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            if ft.is_dir() {
+                Kind::Directory
+            } else if ft.is_symlink() {
+                Kind::Symlink
+            } else if ft.is_file() {
+                Kind::Regular
+            } else {
+                Kind::Unknown
+            }
         }
     }
 
@@ -197,8 +244,8 @@ impl Tree {
                 exists: true,
                 kind: Kind::from_metadata(meta),
                 size: meta.len(),
-                mtime: meta.mtime(),
-                mode: meta.mode(),
+                mtime: platform_mtime(meta),
+                mode: platform_mode(meta),
                 ctick: tick,
                 first_tick,
             },

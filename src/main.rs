@@ -3,14 +3,24 @@ mod client;
 mod config;
 mod cookie;
 mod daemon;
+#[cfg(target_os = "linux")]
 mod fanotify;
+#[cfg(target_os = "macos")]
+mod fsevents;
+mod ipc;
 mod json;
+#[cfg(target_os = "linux")]
+mod linux_watcher;
 mod paths;
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+mod poll_watcher;
 mod protocol;
 mod query;
 mod tree;
 mod value;
 mod watcher;
+#[cfg(windows)]
+mod windows_watcher;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();

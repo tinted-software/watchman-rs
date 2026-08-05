@@ -8,35 +8,34 @@ Watchman was created because raw Linux `inotify` fails when scaling to giant rep
 
 ### A. Client-Daemon Architecture & IPC
 
-* **Persistent Daemon Process:** Watchman operates as a single background service (per user or root). When you run `watchman watch <path>`, the CLI communicates with the background daemon over a local **UNIX domain socket** using **BSER** (Binary Serialization) or JSON.
-* **Single Watch Instance:** Instead of each tool (Buck2, ESLint, Mercurial/Sapling, Jest) spinning up its own watching process and consuming system inotify instances, all tools share a single persistent Watchman daemon instance.
+- **Persistent Daemon Process:** Watchman operates as a single background service (per user or root). When you run `watchman watch <path>`, the CLI communicates with the background daemon over a local **UNIX domain socket** using **BSER** (Binary Serialization) or JSON.
+- **Single Watch Instance:** Instead of each tool (Buck2, ESLint, Mercurial/Sapling, Jest) spinning up its own watching process and consuming system inotify instances, all tools share a single persistent Watchman daemon instance.
 
 ### B. Inotify Management & Directory Crawling
 
-* **Inotify Directory Watched (Not Files):** Linux’s `inotify` cannot watch subdirectories recursively with a single system call; `IN_WATCH_MASK` must be added manually to *every single directory* in the tree.
-* **Crawl & Dynamic Watch Attachment:** When Watchman starts watching a root:
+- **Inotify Directory Watched (Not Files):** Linux’s `inotify` cannot watch subdirectories recursively with a single system call; `IN_WATCH_MASK` must be added manually to _every single directory_ in the tree.
+- **Crawl & Dynamic Watch Attachment:** When Watchman starts watching a root:
+
 1. It performs a **full directory crawl** (using `fts` / `readdir`) to discover all subdirectories and builds an in-memory representation of the file tree.
 2. It calls `inotify_add_watch(fd, dir_path, flags)` for **every directory**.
 3. When `IN_CREATE` events occur for new directories, Watchman automatically adds new `inotify` watches recursively.
 4. When `IN_DELETE` or `IN_IGNORED` events fire (e.g. `rm -rf`), Watchman cleans up its watch handles.
 
-
-
 ### C. Cookie Files & Settling (Synchronization)
 
-* **The Cookie Mechanism:** `inotify` events are asynchronous, meaning events might still be sitting in kernel queues when a client queries Watchman. To ensure "read-your-writes" consistency:
+- **The Cookie Mechanism:** `inotify` events are asynchronous, meaning events might still be sitting in kernel queues when a client queries Watchman. To ensure "read-your-writes" consistency:
+
 1. Watchman writes a temporary **cookie file** (`.watchman-cookie-<hostname>-<pid>-<seq>`) into the root directory.
 2. It then blocks client query responses until it receives the `inotify` event acknowledging that the cookie file was created/deleted.
 3. Once the cookie event passes through the queue, Watchman knows its in-memory tree is up-to-date with disk state.
 
-
-* **Settling Delay:** Watchman queues events and waits for the filesystem to "settle" (quiet period) before dispatching updates to triggers or subscriptions to prevent intermediate build artifacts from triggering cascade builds.
+- **Settling Delay:** Watchman queues events and waits for the filesystem to "settle" (quiet period) before dispatching updates to triggers or subscriptions to prevent intermediate build artifacts from triggering cascade builds.
 
 ### D. In-Memory AST & Clock-Based Query Engine
 
-* **In-Memory File Tree:** Watchman maintains an in-memory graph of the filesystem metadata (stat info: mtime, size, mode, sha1/content hashes).
-* **Logical Clocks (`c:12345:67`):** Every mutation bumps a global logical clock ticks counter.
-* **JSON Expression Evaluator:** Clients run queries like `{"since": "c:12345:67", "expression": ["match", "*.rs"]}`. Watchman evaluates this query entirely **in-memory** across its tree without hitting the disk, returning matching paths in milliseconds.
+- **In-Memory File Tree:** Watchman maintains an in-memory graph of the filesystem metadata (stat info: mtime, size, mode, sha1/content hashes).
+- **Logical Clocks (`c:12345:67`):** Every mutation bumps a global logical clock ticks counter.
+- **JSON Expression Evaluator:** Clients run queries like `{"since": "c:12345:67", "expression": ["match", "*.rs"]}`. Watchman evaluates this query entirely **in-memory** across its tree without hitting the disk, returning matching paths in milliseconds.
 
 ---
 
@@ -46,9 +45,9 @@ When you run Buck2 without Watchman, Buck2 uses its own internal file-watching l
 
 1. **`max_user_watches` Limit:** The Linux kernel defaults `fs.inotify.max_user_watches` to a low value (historically 8,192). Large repos with >100k directories crash with `ENOSPC` (No space left on device) unless you `sysctl` bump it.
 2. **`max_queued_events` Overflow:** During massive git checkouts (e.g., changing branches with 50,000 changed files), kernel queues fill up, leading to `IN_Q_OVERFLOW`.
-* *Buck2 internal:* Drop events or throw errors, forcing full workspace rescans.
-* *Watchman:* Detects `IN_Q_OVERFLOW`, marks the watch state as dirty, and triggers a lightweight internal recrawl to reconcile state.
 
+- _Buck2 internal:_ Drop events or throw errors, forcing full workspace rescans.
+- _Watchman:_ Detects `IN_Q_OVERFLOW`, marks the watch state as dirty, and triggers a lightweight internal recrawl to reconcile state.
 
 3. **Shared State:** If you run multiple commands, Buck2 internal watcher starts and stops or competes with other dev tools. Watchman shares watches across processes.
 
@@ -83,34 +82,33 @@ If your goal is a lightweight, single `cargo build`-able binary that impersoante
 
 Buck2 speaks Watchman’s native binary serialization protocol, **BSER**:
 
-* You must implement a BSER encoder/decoder (or use serde with BSER, though BSER has variable-length integer wire formats).
-* Alternatively, handle Watchman’s UNIX socket text JSON fallback if Buck2 supports JSON mode, but BSER is default for speed.
+- You must implement a BSER encoder/decoder (or use serde with BSER, though BSER has variable-length integer wire formats).
+- Alternatively, handle Watchman’s UNIX socket text JSON fallback if Buck2 supports JSON mode, but BSER is default for speed.
 
 ### B. Linux Kernel Watch Backend Choice
 
 You have two choices for watching files on Linux in Rust:
 
 1. **`inotify` (standard user space):**
-* Use crates like `inotify` or `notify` (with raw inotify feature).
-* You **must** recursively add watches to directories with `inotify_add_watch`.
-* Handle `IN_Q_OVERFLOW` by triggering an asynchronous directory recrawl.
 
+- Use crates like `inotify` or `notify` (with raw inotify feature).
+- You **must** recursively add watches to directories with `inotify_add_watch`.
+- Handle `IN_Q_OVERFLOW` by triggering an asynchronous directory recrawl.
 
 2. **`fanotify` (`FAN_REPORT_DFID_NAME` - Linux 5.9+):**
-* *Why:* Modern Linux kernel supports `fanotify` at the filesystem/mount level (`FAN_MARK_FILESYSTEM`), allowing you to watch an **entire directory tree with a single file descriptor** without hitting `max_user_watches` limits!
-* *Caveat:* Requires `CAP_SYS_ADMIN` capability or root unless configured via sysctl (`fs.fanotify.max_queued_events`), but avoids registering 500,000 separate watch descriptors.
 
-
+- _Why:_ Modern Linux kernel supports `fanotify` at the filesystem/mount level (`FAN_MARK_FILESYSTEM`), allowing you to watch an **entire directory tree with a single file descriptor** without hitting `max_user_watches` limits!
+- _Caveat:_ Requires `CAP_SYS_ADMIN` capability or root unless configured via sysctl (`fs.fanotify.max_queued_events`), but avoids registering 500,000 separate watch descriptors.
 
 ### C. Key Watchman Commands to Implement for Buck2
 
 Buck2 only relies on a subset of the Watchman RPC interface:
 
-* `version`: Returns capabilities (e.g. `{"version": "2026.01.01", "capabilities": {...}}`).
-* `watch-project`: Resolves the repository root and `.watchmanconfig`.
-* `clock`: Returns current state token (`c:<timestamp>:<pid>:<seq>`).
-* `query`: Accepts JSON query payload (`since`, `expression` matching globs like `*.rs`, `generator`, `fields`: `["name", "exists", "mtime", "mode"]`).
-* `flush-subscriptions` / `subscribe`: For live updates.
+- `version`: Returns capabilities (e.g. `{"version": "2026.01.01", "capabilities": {...}}`).
+- `watch-project`: Resolves the repository root and `.watchmanconfig`.
+- `clock`: Returns current state token (`c:<timestamp>:<pid>:<seq>`).
+- `query`: Accepts JSON query payload (`since`, `expression` matching globs like `*.rs`, `generator`, `fields`: `["name", "exists", "mtime", "mode"]`).
+- `flush-subscriptions` / `subscribe`: For live updates.
 
 ### D. Cookie Files logic
 
@@ -119,3 +117,27 @@ When Buck2 sends a query with `"sync_timeout": 5000`:
 1. Drop a `.watchman-cookie-<random>` file in the root directory.
 2. Wait for your filesystem monitor thread to yield an event for that cookie file name.
 3. Once seen, respond to the query with the changes recorded up to that clock.
+
+---
+
+## 4. Cross-Platform Watch Backends (this crate)
+
+Real Watchman is cross-platform because it picks a different, OS-native
+recursive-watch primitive per platform rather than relying on a single
+lowest-common-denominator API (which is what trips up `notify`-based tools
+like Buck2's built-in watcher on Linux). `watchman-rs` follows the same
+approach; `watcher::spawn` dispatches by `target_os`:
+
+| Platform | Backend                                             | Notes                                                                                                                                                      |
+| -------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linux    | `fanotify` (`FAN_MARK_FILESYSTEM`, single fd)       | Falls back to per-directory `inotify` if `CAP_SYS_ADMIN` is unavailable (`fanotify.rs`, `linux_watcher.rs`).                                               |
+| macOS    | `FSEvents`                                          | Single subscription covers the whole tree recursively; recrawls on `kFSEventStreamEventFlagMustScanSubDirs`/`UserDropped`/`KernelDropped` (`fsevents.rs`). |
+| Windows  | `ReadDirectoryChangesW` with `bWatchSubtree = TRUE` | Single handle, recursive; recrawls on `ERROR_NOTIFY_ENUM_DIR` / buffer overflow (`windows_watcher.rs`).                                                    |
+| other    | Polling recrawl                                     | Last-resort fallback (`poll_watcher.rs`).                                                                                                                  |
+
+The in-memory `Tree`/clock engine, cookie-sync mechanism, and BSER/JSON IPC
+layer are all platform-independent and shared by every backend
+(`tree.rs`, `cookie.rs`, `bser.rs`, `protocol.rs`). The IPC transport itself
+(`ipc.rs`) is a UNIX domain socket on all platforms, using native `AF_UNIX`
+support on Windows 10+ via the `uds_windows` crate so the daemon/client code
+needs no OS-specific branching beyond the `use` line.
